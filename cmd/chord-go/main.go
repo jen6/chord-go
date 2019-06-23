@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/jen6/chord-go"
@@ -36,6 +37,7 @@ func main() {
 	if *successorIp != "" && *successorPort != "" {
 		successorNode := chord.CalcNode(*successorIp, *successorPort)
 		node.Successor = &successorNode
+		node.JoinDHT()
 	}
 
 	e := echo.New()
@@ -95,11 +97,13 @@ func main() {
 
 	//notify to successor, this node is predecessor
 	e.POST("/predecessor/:id", func(c echo.Context) error {
-		predNode := new(chord.Node)
-		if err := c.Bind(predNode); err != nil {
+		predNode := chord.Node{}
+		err := json.NewDecoder(c.Request().Body).Decode(&predNode)
+		if err != nil {
 			return c.String(http.StatusInternalServerError, err.Error())
 		}
-		moveMap, err := node.SetPredecessor(predNode)
+
+		moveMap, err := node.SetPredecessor(&predNode)
 		if err != nil {
 			return c.String(http.StatusForbidden, err.Error())
 		}

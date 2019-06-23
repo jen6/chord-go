@@ -1,15 +1,18 @@
 package chord
 
 import (
-	//"context"
+	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/crc32"
 	"io"
-	//"net/http"
-	//"time"
+	"log"
+	"net/http"
+	"time"
 )
 
 type Node struct {
@@ -108,6 +111,62 @@ func (n *Node) SetPredecessor(pre *Node) (map[string]string, error) {
 	} else {
 		return map[string]string{}, errors.New("Not predecessor")
 	}
+}
+
+func (n *Node) JoinDHT() {
+	if n.Successor == nil {
+		return
+	}
+	addr := n.GetNearestSuccessorAddr(
+		"/successor",
+		ConvertHexStr(n.Id))
+
+	req, err := http.NewRequest("GET", addr, nil)
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+
+	ctx, _ := context.WithTimeout(
+		context.Background(),
+		10*time.Second)
+	findPredecessorReq := req.WithContext(ctx)
+
+	client := &http.Client{}
+
+	resp, err := client.Do(findPredecessorReq)
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+
+	successor := Node{}
+	json.NewDecoder(resp.Body).Decode(&successor)
+	resp.Body.Close()
+	n.Successor = &successor
+	if successor.Successor != nil {
+		n.Predecessor = successor.Successor
+	}
+
+	addr = n.GetNearestSuccessorAddr(
+		"/predecessor",
+		ConvertHexStr(n.Id))
+
+	marshaled, _ := json.Marshal(*n)
+	req, err = http.NewRequest(
+		"POST",
+		addr,
+		bytes.NewBuffer(marshaled))
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+
+	ctx, _ = context.WithTimeout(
+		context.Background(),
+		10*time.Second)
+	notifySuccessorReq := req.WithContext(ctx)
+	notifySuccessorReq.Header.Set("Content-Type", "application/json")
+
+	resp, err = client.Do(notifySuccessorReq)
+	fmt.Println(resp.Status)
 }
 
 func ConvertStrHex(id string) uint32 {
