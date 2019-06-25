@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"github.com/jen6/chord-go"
 	"github.com/labstack/echo"
-	"github.com/labstack/echo/middleware"
+	//"github.com/labstack/echo/middleware"
 	"net/http"
 )
 
@@ -33,6 +33,8 @@ func main() {
 	}
 
 	node := chord.NewNode(*ip, *port)
+	runFunc := node.Run()
+	go runFunc()
 
 	if *successorIp != "" && *successorPort != "" {
 		successorNode := chord.CalcNode(*successorIp, *successorPort)
@@ -41,7 +43,7 @@ func main() {
 	}
 
 	e := echo.New()
-	e.Use(middleware.Logger())
+	//e.Use(middleware.Logger())
 	//	e.Use(middleware.Recover())
 	fmt.Println("echo setted")
 
