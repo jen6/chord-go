@@ -33,14 +33,15 @@ func main() {
 	}
 
 	node := chord.NewNode(*ip, *port)
-	runFunc := node.Run()
-	go runFunc()
 
 	if *successorIp != "" && *successorPort != "" {
-		successorNode := chord.CalcNode(*successorIp, *successorPort)
-		node.Successor = &successorNode
+		successorInfo := chord.CalcNode(*successorIp, *successorPort)
+		node.Info.Successor = &successorInfo
 		node.JoinDHT()
 	}
+
+	runFunc := node.Run()
+	go runFunc()
 
 	e := echo.New()
 	//e.Use(middleware.Logger())
@@ -91,15 +92,15 @@ func main() {
 		id := c.Param("id")
 		if !node.IsSuccessor(id) {
 			addr := node.GetNearestSuccessorAddr("/successor", id)
-			fmt.Println(addr)
+			fmt.Println("to successor : ", addr)
 			return c.Redirect(http.StatusFound, addr)
 		}
-		return c.JSON(http.StatusOK, &node)
+		return c.JSON(http.StatusOK, &node.Info)
 	})
 
 	//notify to successor, this node is predecessor
 	e.POST("/predecessor/:id", func(c echo.Context) error {
-		predNode := chord.Node{}
+		predNode := chord.NodeInfo{}
 		err := json.NewDecoder(c.Request().Body).Decode(&predNode)
 		if err != nil {
 			return c.String(http.StatusInternalServerError, err.Error())

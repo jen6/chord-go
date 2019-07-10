@@ -15,13 +15,21 @@ import (
 	"time"
 )
 
+type NodeInfo struct {
+	Ip          string    `json:"ip"`
+	Port        string    `json:"port"`
+	Id          uint32    `json:"id"`
+	Successor   *NodeInfo `json:"succesor"`
+	Predecessor *NodeInfo `json:"predecessor"`
+}
+
+func (n NodeInfo) GenerateAddress() string {
+	return "http://" + n.Ip + ":" + n.Port
+}
+
 type Node struct {
-	Ip          string `json:"ip"`
-	Port        string `json:"port"`
-	Id          uint32 `json:"id"`
-	Successor   *Node  `json:"succesor"`
-	Predecessor *Node  `json:"predecessor"`
-	storage     map[string]string
+	Info    NodeInfo
+	storage map[string]string
 }
 
 func (n Node) Get(key string) (string, error) {
@@ -45,16 +53,12 @@ func (n *Node) Set(key, value string) error {
 	return nil
 }
 
-func (n Node) GenerateAddress() string {
-	return "http://" + n.Ip + ":" + n.Port
-}
-
 func (n Node) IsSuccessor(id string) bool {
-	if n.Successor == nil {
+	if n.Info.Successor == nil {
 		return true
 	}
 
-	if n.Predecessor == nil {
+	if n.Info.Predecessor == nil {
 		fmt.Println("predecessor is nill")
 		return false
 	}
@@ -64,7 +68,7 @@ func (n Node) IsSuccessor(id string) bool {
 	//fmt.Printf("%#x %#x %#x\n", n.Predecessor.Id, key, n.Id)
 	//fmt.Printf("%t %t\n", n.Predecessor.Id < key, key <= n.Id)
 	//return if this node is successor
-	return IsInclude(n.Predecessor.Id, n.Id, key)
+	return IsInclude(n.Info.Predecessor.Id, n.Info.Id, key)
 }
 
 func (n Node) IsSuccessorKey(key string) bool {
@@ -75,7 +79,7 @@ func (n Node) IsSuccessorKey(key string) bool {
 
 func (n Node) GetNearestSuccessorAddr(path, id string) string {
 	//	key := ConvertStrHex(id)
-	addr := n.Successor.GenerateAddress()
+	addr := n.Info.Successor.GenerateAddress()
 	addr += path + "/"
 	addr += id
 	return addr
@@ -93,22 +97,22 @@ func (n *Node) findKVToPredecessor(id uint32) map[string]string {
 	return buf
 }
 
-func (n *Node) SetPredecessor(pre *Node) (map[string]string, error) {
-	if n.Predecessor == nil {
-		n.Predecessor = pre
-		if n.Successor == nil {
-			n.Successor = pre
+func (n *Node) SetPredecessor(pre *NodeInfo) (map[string]string, error) {
+	if n.Info.Predecessor == nil {
+		n.Info.Predecessor = pre
+		if n.Info.Successor == nil {
+			n.Info.Successor = pre
 		}
 		return n.findKVToPredecessor(pre.Id), nil
 	}
 
-	if n.Predecessor.Id == pre.Id {
+	if n.Info.Predecessor.Id == pre.Id {
 		return map[string]string{}, nil
 	}
 
 	//if n.Predecessor.Id < pre.Id && pre.Id <= n.Id {
-	if IsInclude(n.Predecessor.Id, n.Id, pre.Id) {
-		n.Predecessor = pre
+	if IsInclude(n.Info.Predecessor.Id, n.Info.Id, pre.Id) {
+		n.Info.Predecessor = pre
 		return n.findKVToPredecessor(pre.Id), nil
 	} else {
 		return map[string]string{}, errors.New("Not predecessor")
@@ -118,15 +122,15 @@ func (n *Node) SetPredecessor(pre *Node) (map[string]string, error) {
 func (n *Node) Notify() {
 	addr := n.GetNearestSuccessorAddr(
 		"/predecessor",
-		ConvertHexStr(n.Id))
+		ConvertHexStr(n.Info.Id))
 
-	marshaled, _ := json.Marshal(*n)
+	marshaled, _ := json.Marshal(&n.Info)
 	req, err := http.NewRequest(
 		"POST",
 		addr,
 		bytes.NewBuffer(marshaled))
 	if err != nil {
-		log.Fatal(err.Error())
+		log.Fatal("Notify : ", err.Error())
 	}
 
 	ctx, _ := context.WithTimeout(
@@ -154,12 +158,12 @@ func (n *Node) Notify() {
 }
 
 func (n *Node) JoinDHT() {
-	if n.Successor == nil {
+	if n.Info.Successor == nil {
 		return
 	}
 	addr := n.GetNearestSuccessorAddr(
 		"/successor",
-		ConvertHexStr(n.Id))
+		ConvertHexStr(n.Info.Id))
 
 	req, err := http.NewRequest("GET", addr, nil)
 	if err != nil {
@@ -178,27 +182,27 @@ func (n *Node) JoinDHT() {
 		log.Fatal(err.Error())
 	}
 
-	successor := Node{}
+	successor := NodeInfo{}
 	json.NewDecoder(resp.Body).Decode(&successor)
 	resp.Body.Close()
-	n.Successor = &successor
+	n.Info.Successor = &successor
 
 	if successor.Successor == nil && successor.Predecessor == nil {
-		n.Predecessor = &successor
+		n.Info.Predecessor = &successor
 	} else if successor.Successor != nil {
-		n.Predecessor = successor.Successor
+		n.Info.Predecessor = successor.Successor
 	}
 
 	n.Notify()
 }
 
 func (n *Node) Stabilize() {
-	if n.Successor == nil {
+	if n.Info.Successor == nil {
 		return
 	}
 	addr := n.GetNearestSuccessorAddr(
 		"/successor",
-		ConvertHexStr(n.Successor.Id))
+		ConvertHexStr(n.Info.Successor.Id))
 
 	req, err := http.NewRequest("GET", addr, nil)
 	if err != nil {
@@ -217,15 +221,15 @@ func (n *Node) Stabilize() {
 		log.Fatal(err.Error())
 	}
 
-	successor := Node{}
+	successor := NodeInfo{}
 	json.NewDecoder(resp.Body).Decode(&successor)
 	resp.Body.Close()
 
 	if successor.Predecessor != nil {
 		//key := successor.Predecessor.Id
-		if IsInclude(n.Id, successor.Id, successor.Predecessor.Id) {
+		if IsInclude(n.Info.Id, successor.Id, successor.Predecessor.Id) {
 			//if n.Id < key && key <= successor.Id {
-			n.Successor = successor.Predecessor
+			n.Info.Successor = successor.Predecessor
 		}
 	}
 	n.Notify()
@@ -234,12 +238,12 @@ func (n *Node) Stabilize() {
 func (n *Node) Run() func() {
 	return func() {
 		for {
-			fmt.Printf("[%d] : ", n.Id)
-			if n.Successor != nil {
-				fmt.Printf("Successor : %d, ", n.Successor.Id)
+			fmt.Printf("[%d] : ", n.Info.Id)
+			if n.Info.Successor != nil {
+				fmt.Printf("Successor : %d, ", n.Info.Successor.Id)
 			}
-			if n.Predecessor != nil {
-				fmt.Printf("Predecessor : %d", n.Predecessor.Id)
+			if n.Info.Predecessor != nil {
+				fmt.Printf("Predecessor : %d", n.Info.Predecessor.Id)
 			}
 			fmt.Println("")
 			time.Sleep(2 * time.Second)
@@ -279,19 +283,20 @@ func StrToCRC(str string) uint32 {
 	return hash.Sum32()
 }
 
-func CalcNode(ip, port string) Node {
-	node := Node{Ip: ip, Port: port}
+func CalcNode(ip, port string) NodeInfo {
+	node := NodeInfo{Ip: ip, Port: port}
 	crcTable := crc32.MakeTable(crc32.IEEE)
 	hash := crc32.New(crcTable)
 	if _, err := io.WriteString(hash, ip+":"+port); err != nil {
-		return Node{}
+		return NodeInfo{}
 	}
 	node.Id = hash.Sum32()
 	return node
 }
 
 func NewNode(ip, port string) Node {
-	node := CalcNode(ip, port)
+	node := Node{}
+	node.Info = CalcNode(ip, port)
 	node.storage = make(map[string]string)
 	return node
 }
